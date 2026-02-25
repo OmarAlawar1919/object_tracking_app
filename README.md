@@ -1,5 +1,6 @@
 # 🎯 Object Tracking Application
 ![alt text](image.png)
+
 A powerful and user-friendly web application for tracking moving objects in videos using computer vision techniques. Built with Python, OpenCV, and Streamlit.
 
 ![Python](https://img.shields.io/badge/Python-3.7+-blue.svg)

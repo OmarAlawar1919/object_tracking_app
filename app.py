@@ -217,22 +217,10 @@ if uploaded_file is not None:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             
             # Display frames
-            # Use JPEG + changing caption to ensure the frontend refreshes each frame.
-            stframe.image(
-                convert_color(frame),
-                channels="RGB",
-                use_container_width=True,
-                output_format="JPEG",
-                caption=f"Frame {frame_number}/{frame_count}"
-            )
+            stframe.image(convert_color(frame), channels="RGB", use_column_width=True)
             
             if show_mask:
-                mask_frame.image(
-                    fg_mask,
-                    use_container_width=True,
-                    output_format="JPEG",
-                    caption=f"Detection Mask — Frame {frame_number}"
-                )
+                mask_frame.image(fg_mask, channels="GRAY", use_column_width=True, caption="Detection Mask")
             
             # Update statistics
             if show_stats and frame_number % 10 == 0:  # Update every 10 frames

@@ -3,6 +3,7 @@ import cv2
 import streamlit as st
 import tempfile
 import time
+import importlib
 from datetime import datetime
 
 # Page configuration
@@ -42,6 +43,30 @@ st.markdown("""
 
 def convert_color(img):
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+
+def cv2_frames_advance(video_path, sample_frames=6):
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        return False
+
+    previous_frame = None
+    distinct_transitions = 0
+
+    try:
+        for _ in range(sample_frames):
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if previous_frame is not None and not np.array_equal(frame, previous_frame):
+                distinct_transitions += 1
+
+            previous_frame = frame
+    finally:
+        cap.release()
+
+    return distinct_transitions > 0
 
 # Header
 st.markdown('<p class="main-header">🎯 Object Tracking Application</p>', unsafe_allow_html=True)
@@ -112,7 +137,7 @@ if uploaded_file is not None:
     tfile.close()
 
     cap = cv2.VideoCapture(tfile.name)
-    
+
     if not cap.isOpened():
         st.error("❌ Could not open video file. Please try another file.")
     else:
@@ -137,6 +162,22 @@ if uploaded_file is not None:
             st.metric("⏱️ Duration", f"{duration:.1f}s")
         
         st.markdown("---")
+
+        # Choose decoder backend (OpenCV first, fallback for cloud codec issues)
+        use_imageio_fallback = not cv2_frames_advance(tfile.name)
+        cap.release()
+
+        if use_imageio_fallback:
+            st.warning("⚠️ OpenCV decoder returned non-advancing frames on this environment. Using imageio-ffmpeg fallback.")
+            try:
+                iio = importlib.import_module("imageio.v3")
+            except ImportError:
+                st.error("❌ imageio-ffmpeg is required for fallback decoding. Please ensure dependencies are installed.")
+                st.stop()
+            frame_iterator = iio.imiter(tfile.name)
+        else:
+            cap = cv2.VideoCapture(tfile.name)
+            frame_iterator = None
         
         # Create columns for video display
         if show_mask:
@@ -173,10 +214,20 @@ if uploaded_file is not None:
         start_time = time.time()
         
         # Process video
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:            
-                break
+        while True:
+            if use_imageio_fallback:
+                try:
+                    frame_rgb = next(frame_iterator)
+                    frame = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                except StopIteration:
+                    break
+                except Exception as ex:
+                    st.error(f"❌ Video decoding failed with imageio fallback: {ex}")
+                    break
+            else:
+                ret, frame = cap.read()
+                if not ret:
+                    break
             
             frame_number += 1
             
@@ -239,14 +290,15 @@ if uploaded_file is not None:
                         st.metric("Processing FPS", f"{processing_fps:.1f}")
             
             # Update progress
-            progress = frame_number / frame_count
-            progress_bar.progress(progress)
+            progress = (frame_number / frame_count) if frame_count > 0 else 0
+            progress_bar.progress(min(max(progress, 0.0), 1.0))
             status_text.text(f"Processing: {progress*100:.1f}% complete")
             
             # Control playback speed
             time.sleep(0.03 / playback_speed)
         
-        cap.release()
+        if not use_imageio_fallback:
+            cap.release()
         
         # Final statistics
         progress_bar.progress(1.0)

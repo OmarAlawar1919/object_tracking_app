@@ -190,6 +190,10 @@ if uploaded_file is not None:
         # Statistics placeholders
         if show_stats:
             stats_placeholder = st.empty()
+
+        # Output video path (for reliable playback after processing)
+        processed_video_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
+        output_video_writer = None
         
         # Progress bar
         progress_bar = st.progress(0)
@@ -212,6 +216,22 @@ if uploaded_file is not None:
         max_objects_frame = 0
         
         start_time = time.time()
+
+        # Streamlit Cloud can throttle very frequent UI updates.
+        source_fps = fps if fps and fps > 0 else 25
+        preview_target_fps = 8
+        preview_stride = max(1, int(source_fps / preview_target_fps))
+
+        # Initialize processed-video writer for smooth playback in browser.
+        try:
+            imageio_v2 = importlib.import_module("imageio.v2")
+            output_video_writer = imageio_v2.get_writer(
+                processed_video_path,
+                fps=source_fps,
+                codec="libx264"
+            )
+        except Exception as ex:
+            st.warning(f"⚠️ Could not initialize processed video writer: {ex}")
         
         # Process video
         while True:
@@ -266,12 +286,29 @@ if uploaded_file is not None:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             cv2.putText(frame, f"Objects: {objects_in_frame}", (10, 60),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+            # Write processed frame to output video (RGB for imageio).
+            if output_video_writer is not None:
+                output_video_writer.append_data(convert_color(frame))
             
             # Display frames
-            stframe.image(convert_color(frame), channels="RGB", use_column_width=True)
+            if frame_number == 1 or frame_number % preview_stride == 0 or frame_number == frame_count:
+                stframe.image(
+                    convert_color(frame),
+                    channels="RGB",
+                    use_container_width=True,
+                    output_format="JPEG",
+                    caption=f"Live Preview — Frame {frame_number}/{frame_count}"
+                )
             
             if show_mask:
-                mask_frame.image(fg_mask, channels="GRAY", use_column_width=True, caption="Detection Mask")
+                if frame_number == 1 or frame_number % preview_stride == 0 or frame_number == frame_count:
+                    mask_frame.image(
+                        fg_mask,
+                        use_container_width=True,
+                        output_format="JPEG",
+                        caption=f"Detection Mask — Frame {frame_number}"
+                    )
             
             # Update statistics
             if show_stats and frame_number % 10 == 0:  # Update every 10 frames
@@ -295,10 +332,13 @@ if uploaded_file is not None:
             status_text.text(f"Processing: {progress*100:.1f}% complete")
             
             # Control playback speed
-            time.sleep(0.03 / playback_speed)
+            time.sleep((1.0 / source_fps) / playback_speed)
         
         if not use_imageio_fallback:
             cap.release()
+
+        if output_video_writer is not None:
+            output_video_writer.close()
         
         # Final statistics
         progress_bar.progress(1.0)
@@ -319,6 +359,11 @@ if uploaded_file is not None:
         with summary_col4:
             avg_objects = total_detections / frame_number if frame_number > 0 else 0
             st.metric("Avg Detections/Frame", f"{avg_objects:.2f}")
+
+        if output_video_writer is not None:
+            st.markdown("---")
+            st.subheader("▶️ Processed Video Playback")
+            st.video(processed_video_path)
         
         st.success("🎉 Video processing completed successfully!")
         

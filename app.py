@@ -3,6 +3,7 @@ import cv2
 import streamlit as st
 import tempfile
 import time
+from datetime import datetime
 
 # Page configuration
 st.set_page_config(
@@ -41,12 +42,6 @@ st.markdown("""
 
 def convert_color(img):
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-
-
-def get_frame_delay_seconds(video_fps, playback_speed):
-    base_fps = video_fps if video_fps and video_fps > 0 else 30
-    delay = 1.0 / (base_fps * playback_speed)
-    return max(delay, 0.001)
 
 # Header
 st.markdown('<p class="main-header">🎯 Object Tracking Application</p>', unsafe_allow_html=True)
@@ -122,7 +117,7 @@ if uploaded_file is not None:
         st.error("❌ Could not open video file. Please try another file.")
     else:
         # Get video properties
-        fps = float(cap.get(cv2.CAP_PROP_FPS))
+        fps = int(cap.get(cv2.CAP_PROP_FPS))
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -135,7 +130,7 @@ if uploaded_file is not None:
         with info_col1:
             st.metric("📐 Resolution", f"{width}x{height}")
         with info_col2:
-            st.metric("🎬 FPS", f"{fps:.1f}")
+            st.metric("🎬 FPS", f"{fps}")
         with info_col3:
             st.metric("📊 Total Frames", f"{frame_count}")
         with info_col4:
@@ -222,20 +217,10 @@ if uploaded_file is not None:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             
             # Display frames
-            stframe.image(
-                convert_color(frame),
-                use_container_width=True,
-                output_format="JPEG"
-            )
+            stframe.image(convert_color(frame), channels="RGB", use_column_width=True)
             
             if show_mask:
-                mask_frame.image(
-                    fg_mask,
-                    channels="GRAY",
-                    use_container_width=True,
-                    caption="Detection Mask",
-                    output_format="JPEG"
-                )
+                mask_frame.image(fg_mask, channels="GRAY", use_column_width=True, caption="Detection Mask")
             
             # Update statistics
             if show_stats and frame_number % 10 == 0:  # Update every 10 frames
@@ -259,7 +244,7 @@ if uploaded_file is not None:
             status_text.text(f"Processing: {progress*100:.1f}% complete")
             
             # Control playback speed
-            time.sleep(get_frame_delay_seconds(fps, playback_speed))
+            time.sleep(0.03 / playback_speed)
         
         cap.release()
         

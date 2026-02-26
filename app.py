@@ -3,8 +3,6 @@ import cv2
 import streamlit as st
 import tempfile
 import time
-import importlib
-from datetime import datetime
 
 # Page configuration
 st.set_page_config(
@@ -45,28 +43,10 @@ def convert_color(img):
     return cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
 
-def cv2_frames_advance(video_path, sample_frames=6):
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        return False
-
-    previous_frame = None
-    distinct_transitions = 0
-
-    try:
-        for _ in range(sample_frames):
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            if previous_frame is not None and not np.array_equal(frame, previous_frame):
-                distinct_transitions += 1
-
-            previous_frame = frame
-    finally:
-        cap.release()
-
-    return distinct_transitions > 0
+def get_frame_delay_seconds(video_fps, playback_speed):
+    base_fps = video_fps if video_fps and video_fps > 0 else 30
+    delay = 1.0 / (base_fps * playback_speed)
+    return max(delay, 0.001)
 
 # Header
 st.markdown('<p class="main-header">🎯 Object Tracking Application</p>', unsafe_allow_html=True)
@@ -137,12 +117,12 @@ if uploaded_file is not None:
     tfile.close()
 
     cap = cv2.VideoCapture(tfile.name)
-
+    
     if not cap.isOpened():
         st.error("❌ Could not open video file. Please try another file.")
     else:
         # Get video properties
-        fps = int(cap.get(cv2.CAP_PROP_FPS))
+        fps = float(cap.get(cv2.CAP_PROP_FPS))
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -155,29 +135,13 @@ if uploaded_file is not None:
         with info_col1:
             st.metric("📐 Resolution", f"{width}x{height}")
         with info_col2:
-            st.metric("🎬 FPS", f"{fps}")
+            st.metric("🎬 FPS", f"{fps:.1f}")
         with info_col3:
             st.metric("📊 Total Frames", f"{frame_count}")
         with info_col4:
             st.metric("⏱️ Duration", f"{duration:.1f}s")
         
         st.markdown("---")
-
-        # Choose decoder backend (OpenCV first, fallback for cloud codec issues)
-        use_imageio_fallback = not cv2_frames_advance(tfile.name)
-        cap.release()
-
-        if use_imageio_fallback:
-            st.warning("⚠️ OpenCV decoder returned non-advancing frames on this environment. Using imageio-ffmpeg fallback.")
-            try:
-                iio = importlib.import_module("imageio.v3")
-            except ImportError:
-                st.error("❌ imageio-ffmpeg is required for fallback decoding. Please ensure dependencies are installed.")
-                st.stop()
-            frame_iterator = iio.imiter(tfile.name)
-        else:
-            cap = cv2.VideoCapture(tfile.name)
-            frame_iterator = None
         
         # Create columns for video display
         if show_mask:
@@ -190,10 +154,6 @@ if uploaded_file is not None:
         # Statistics placeholders
         if show_stats:
             stats_placeholder = st.empty()
-
-        # Output video path (for reliable playback after processing)
-        processed_video_path = tempfile.NamedTemporaryFile(delete=False, suffix='.mp4').name
-        output_video_writer = None
         
         # Progress bar
         progress_bar = st.progress(0)
@@ -216,38 +176,12 @@ if uploaded_file is not None:
         max_objects_frame = 0
         
         start_time = time.time()
-
-        # Streamlit Cloud can throttle very frequent UI updates.
-        source_fps = fps if fps and fps > 0 else 25
-        preview_target_fps = 8
-        preview_stride = max(1, int(source_fps / preview_target_fps))
-
-        # Initialize processed-video writer for smooth playback in browser.
-        try:
-            imageio_v2 = importlib.import_module("imageio.v2")
-            output_video_writer = imageio_v2.get_writer(
-                processed_video_path,
-                fps=source_fps,
-                codec="libx264"
-            )
-        except Exception as ex:
-            st.warning(f"⚠️ Could not initialize processed video writer: {ex}")
         
         # Process video
-        while True:
-            if use_imageio_fallback:
-                try:
-                    frame_rgb = next(frame_iterator)
-                    frame = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
-                except StopIteration:
-                    break
-                except Exception as ex:
-                    st.error(f"❌ Video decoding failed with imageio fallback: {ex}")
-                    break
-            else:
-                ret, frame = cap.read()
-                if not ret:
-                    break
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:            
+                break
             
             frame_number += 1
             
@@ -286,29 +220,22 @@ if uploaded_file is not None:
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
             cv2.putText(frame, f"Objects: {objects_in_frame}", (10, 60),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-            # Write processed frame to output video (RGB for imageio).
-            if output_video_writer is not None:
-                output_video_writer.append_data(convert_color(frame))
             
             # Display frames
-            if frame_number == 1 or frame_number % preview_stride == 0 or frame_number == frame_count:
-                stframe.image(
-                    convert_color(frame),
-                    channels="RGB",
-                    use_container_width=True,
-                    output_format="JPEG",
-                    caption=f"Live Preview — Frame {frame_number}/{frame_count}"
-                )
+            stframe.image(
+                convert_color(frame),
+                use_container_width=True,
+                output_format="JPEG"
+            )
             
             if show_mask:
-                if frame_number == 1 or frame_number % preview_stride == 0 or frame_number == frame_count:
-                    mask_frame.image(
-                        fg_mask,
-                        use_container_width=True,
-                        output_format="JPEG",
-                        caption=f"Detection Mask — Frame {frame_number}"
-                    )
+                mask_frame.image(
+                    fg_mask,
+                    channels="GRAY",
+                    use_container_width=True,
+                    caption="Detection Mask",
+                    output_format="JPEG"
+                )
             
             # Update statistics
             if show_stats and frame_number % 10 == 0:  # Update every 10 frames
@@ -327,18 +254,14 @@ if uploaded_file is not None:
                         st.metric("Processing FPS", f"{processing_fps:.1f}")
             
             # Update progress
-            progress = (frame_number / frame_count) if frame_count > 0 else 0
-            progress_bar.progress(min(max(progress, 0.0), 1.0))
+            progress = frame_number / frame_count
+            progress_bar.progress(progress)
             status_text.text(f"Processing: {progress*100:.1f}% complete")
             
             # Control playback speed
-            time.sleep((1.0 / source_fps) / playback_speed)
+            time.sleep(get_frame_delay_seconds(fps, playback_speed))
         
-        if not use_imageio_fallback:
-            cap.release()
-
-        if output_video_writer is not None:
-            output_video_writer.close()
+        cap.release()
         
         # Final statistics
         progress_bar.progress(1.0)
@@ -359,11 +282,6 @@ if uploaded_file is not None:
         with summary_col4:
             avg_objects = total_detections / frame_number if frame_number > 0 else 0
             st.metric("Avg Detections/Frame", f"{avg_objects:.2f}")
-
-        if output_video_writer is not None:
-            st.markdown("---")
-            st.subheader("▶️ Processed Video Playback")
-            st.video(processed_video_path)
         
         st.success("🎉 Video processing completed successfully!")
         

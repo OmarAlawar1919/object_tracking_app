@@ -74,7 +74,7 @@ pip install -r requirements.txt
 
 If `requirements.txt` doesn't exist, install manually:
 ```bash
-pip install streamlit opencv-python numpy
+pip install streamlit opencv-python-headless numpy
 ```
 
 ## 💻 Usage
@@ -83,7 +83,7 @@ pip install streamlit opencv-python numpy
 
 1. **Start the Streamlit server**
 ```bash
-streamlit run ObjectTracking.py
+streamlit run app.py
 ```
 
 2. **Open your web browser**
@@ -140,7 +140,7 @@ streamlit run ObjectTracking.py
 ```
 object_tracking_app/
 │
-├── ObjectTracking.py    # Main application file
+├── app.py              # Main application file
 ├── README.md           # Project documentation
 └── requirements.txt    # Python dependencies (optional)
 ```
